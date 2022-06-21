@@ -1,5 +1,5 @@
 project: tsmuxer
-target: tsmuxer
+target: tsMuxeR
 
 cmds:
   - cmd: /repo/bin/tsMuxeR @@
