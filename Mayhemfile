@@ -2,4 +2,4 @@ project: tsmuxer
 target: tsMuxeR
 
 cmds:
-  - cmd: /repo/bin/tsMuxeR @@
+  - cmd: /tsMuxeR @@
