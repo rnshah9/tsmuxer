@@ -45,8 +45,8 @@ static const char* const mov_mdhd_language_map[] = {
 
 struct MOVStts
 {
-    int count;
-    int duration;
+    uint32_t count;
+    uint64_t duration;
 };
 
 struct MOVDref
@@ -105,7 +105,6 @@ struct MOVStreamContext : public Track
           sample_count(0),
           keyframe_count(0),
           time_scale(0),
-          time_offset(0),
           current_sample(0),
           bytes_per_frame(0),
           samples_per_frame(0),
@@ -138,7 +137,6 @@ struct MOVStreamContext : public Track
     unsigned int keyframe_count;
     int time_scale;
     // int time_rate;
-    int time_offset;  ///< time offset of the first edit list entry
     int current_sample;
     unsigned int bytes_per_frame;
     unsigned int samples_per_frame;
@@ -404,7 +402,7 @@ class MovParsedSRTTrackData : public ParsedTrackPrivData
             sttsCnt = m_sc->stts_data[sttsPos].count;
         }
         sttsCnt--;
-        return m_sc->stts_data[sttsPos].duration;
+        return m_sc->stts_data[sttsPos].duration * 1000 / m_sc->time_scale;
     }
 
     void setPrivData(uint8_t* buff, int size) override
@@ -418,6 +416,9 @@ class MovParsedSRTTrackData : public ParsedTrackPrivData
     {
         uint8_t* end = buff + size;
         std::string prefix;
+        std::string suffix;
+        std::string subtitleText;
+        std::vector<pair<int, string>> tags;
         if (m_packetCnt == 0)
             prefix = "\xEF\xBB\xBF";  // UTF-8 header
         int64_t startTime = m_timeOffset + getSttsVal();
@@ -431,13 +432,76 @@ class MovParsedSRTTrackData : public ParsedTrackPrivData
         uint8_t* dst = pkt->data;
         memcpy(dst, prefix.c_str(), prefix.length());
         dst += prefix.length();
+        uint32_t unitSize = 0;
 
-        uint32_t unitSize = (buff[0] << 8) + buff[1];
-        buff += 2;
-        memcpy(dst, buff, unitSize);
-        dst += unitSize;
+        while (unitSize == 0)
+        {
+            unitSize = (buff[0] << 8) | buff[1];
+            buff += 2;
+        }
+        subtitleText = std::string((char*)buff, unitSize);
         buff += unitSize;
-        // TODO: PARSE TEXT MODIFIERS
+
+        while (buff < end)
+        {
+            uint64_t modifierLen = (buff[0] << 24) | (buff[1] << 16) | (buff[2] << 8) | buff[3];
+            uint32_t modifierType = (buff[4] << 24) | (buff[5] << 16) | (buff[6] << 8) | buff[7];
+            buff += 8;
+            modifierLen -= 8;
+            if (modifierLen == 1)  // 64-bit length
+            {
+                modifierLen = 0;
+                for (int i = 0; i < 8; i++)
+                {
+                    modifierLen <<= 8;
+                    modifierLen |= *buff++;
+                }
+                modifierLen -= 8;
+            }
+            if (modifierType == 0x7374796C)  // 'styl' box
+            {
+                uint16_t entry_count = (buff[0] << 8) | buff[1];
+                buff += 2;
+                for (size_t i = 0; i < entry_count; i++)
+                {
+                    prefix = "";
+                    suffix = "";
+                    uint16_t startChar = (buff[0] << 8) | buff[1];
+                    uint16_t endChar = (buff[2] << 8) | buff[3];
+                    buff += 6;  // startChar, endChar, font_ID
+                    if (startChar < endChar)
+                    {
+                        if (*buff & 1)
+                        {
+                            prefix += "<b>";
+                            suffix = "</b>" + suffix;
+                        }
+                        if (*buff & 2)
+                        {
+                            prefix += "<i>";
+                            suffix = "</i>" + suffix;
+                        }
+                        if (*buff & 4)
+                        {
+                            prefix += "<u>";
+                            suffix = "</u>" + suffix;
+                        }
+                        tags.insert(tags.begin(), std::make_pair(startChar, prefix));
+                        tags.push_back(std::make_pair(endChar, suffix));
+                    }
+                    buff += 6;  // font-size, text-color-rgba[4]
+                }
+            }
+            else
+                buff += modifierLen;
+        }
+        if (tags.size() > 0)
+        {
+            sort(tags.begin(), tags.end(), greater<>());
+            for (auto i : tags) subtitleText.insert(i.first, i.second);
+        }
+        memcpy(dst, subtitleText.c_str(), subtitleText.length());
+        dst += subtitleText.length();
 
         memcpy(dst, "\n\n", 2);
         m_timeOffset = endTime;
@@ -462,16 +526,64 @@ class MovParsedSRTTrackData : public ParsedTrackPrivData
         prefix += floatToTime(endTime / 1e3, ',');
         prefix += '\n';
         int textLen = 0;
+        uint32_t unitSize = 0;
 
-        if (buff + 2 > end)
-            THROW(ERR_MOV_PARSE, "MP4/MOV error: Invalid SRT frame at position " << m_demuxer->getProcessedBytes());
-        uint32_t unitSize = (buff[0] << 8) + buff[1];
-        buff += 2;
-        textLen += unitSize;
-        if (buff + unitSize > end)
-            THROW(ERR_MOV_PARSE, "MP4/MOV error: Invalid SRT frame at position " << m_demuxer->getProcessedBytes());
-        buff += unitSize;
-        // TODO: PARSE TEXT MODIFIERS
+        try
+        {
+            while (unitSize == 0)
+            {
+                unitSize = (buff[0] << 8) | buff[1];
+                buff += 2;
+            }
+            textLen = unitSize;
+            buff += unitSize;
+
+            while (buff < end)
+            {
+                uint64_t modifierLen = (buff[0] << 24) | (buff[1] << 16) | (buff[2] << 8) | buff[3];
+                uint32_t modifierType = (buff[4] << 24) | (buff[5] << 16) | (buff[6] << 8) | buff[7];
+                buff += 8;
+                modifierLen -= 8;
+                if (modifierLen == 1)  // 64-bit length
+                {
+                    modifierLen = 0;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        modifierLen <<= 8;
+                        modifierLen |= *buff++;
+                    }
+                    modifierLen -= 8;
+                }
+                if (modifierType == 0x7374796C)  // 'styl' box
+                {
+                    uint16_t entry_count = (buff[0] << 8) | buff[1];
+                    buff += 2;
+                    for (size_t i = 0; i < entry_count; i++)
+                    {
+                        uint16_t startChar = (buff[0] << 8) | buff[1];
+                        uint16_t endChar = (buff[2] << 8) | buff[3];
+                        buff += 6;                // startChar, endChar, font-ID
+                        if (startChar < endChar)  // face style flags
+                        {
+                            if (*buff & 1)  // bold
+                                textLen += 7;
+                            if (*buff & 2)  // italics
+                                textLen += 7;
+                            if (*buff & 4)  // underline
+                                textLen += 7;
+                        }
+                        buff += 6;  // font-size, text-color-rgba[4]
+                    }
+                }
+                else
+                    buff += modifierLen;
+            }
+        }
+        catch (BitStreamException& e)
+        {
+            (void)e;
+            LTRACE(LT_ERROR, 2, "MP4/MOV error: Invalid SRT frame at position " << m_demuxer->getProcessedBytes());
+        }
 
         sttsCnt = stored_sttsCnt;
         sttsPos = stored_sttsPos;
@@ -1212,9 +1324,9 @@ int MovDemuxer::mov_read_mvhd(MOVAtom atom)
         get_be32();  // creation time
         get_be32();  // modification time
     }
-    uint32_t time_scale = get_be32();                             // time scale
-    int64_t duration = (version == 1) ? get_be64() : get_be32();  // duration ;
-    fileDuration = duration * 1000000000ll / time_scale;
+    m_timescale = get_be32();                                      // time scale
+    uint64_t duration = (version == 1) ? get_be64() : get_be32();  // duration
+    fileDuration = duration * 1000000000ll / m_timescale;
     get_be32();      // preferred scale
     get_be16();      // preferred volume
     skip_bytes(10);  // reserved
@@ -1626,22 +1738,28 @@ if (st->codec->codec_id == CODEC_ID_QDM2) {
 
 int MovDemuxer::mov_read_elst(MOVAtom atom)
 {
-    auto st = (MOVStreamContext*)tracks[num_tracks - 1];
-    get_byte();                   // version
+    int version = get_byte();
     get_be24();                   // flags
     int edit_count = get_be32();  // entries
 
     for (int i = 0; i < edit_count; i++)
     {
-        get_be32();             // Track duration
-        int time = get_be32();  // Media time
-        get_be32();             // Media rate
-        if (i == 0 && time != -1)
+        if (version == 1)
         {
-            st->time_offset = time;
-            // st->time_rate = av_gcd(st->time_rate, time);
+            uint64_t duration = get_be64();
+            int64_t time = get_be64();
+            if (time == -1)
+                m_firstTimecode[num_tracks] = duration * 1000 / m_timescale;
+        }
+        else
+        {
+            uint64_t duration = get_be32();
+            int32_t time = get_be32();
+            if (time == -1)
+                m_firstTimecode[num_tracks] = duration * 1000 / m_timescale;
         }
     }
+    get_be32();  // Media rate
     return 0;
 }
 

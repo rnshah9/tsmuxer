@@ -69,9 +69,9 @@ TSMuxer::TSMuxer(MuxerManager* owner) : AbstractMuxer(owner)
     m_lastPMTPCR = -1;
     m_lastSITPCR = -1;
     m_nullCnt = 0;
-    m_pmtCnt = 0;  // 2;
-    m_patCnt = 0;  // 2;
-    m_sitCnt = 1;
+    m_pmtCnt = 0;
+    m_patCnt = 0;
+    m_sitCnt = 0;
     m_needTruncate = false;
     m_videoTrackCnt = 0;
     m_DVvideoTrackCnt = 0;
@@ -1137,7 +1137,7 @@ void TSMuxer::buildPAT()
     tsPacket->payloadStart = 1;
     m_pat.pmtPids[SIT_PID] = 0;          // add NIT. program number = 0
     m_pat.pmtPids[DEFAULT_PMT_PID] = 1;  // add PMT. program number = 1
-    m_pat.transport_stream_id = 1;       // version of transport stream
+    m_pat.transport_stream_id = 0;       // version of transport stream
     uint32_t size = m_pat.serialize(m_patBuffer + TSPacket::TS_HEADER_SIZE, TS_FRAME_SIZE - TSPacket::TS_HEADER_SIZE);
     memset(m_patBuffer + TSPacket::TS_HEADER_SIZE + size, 0xff, TS_FRAME_SIZE - TSPacket::TS_HEADER_SIZE - size);
 }

@@ -150,7 +150,7 @@ QString unquoteStr(QString val)
 bool isVideoCodec(const QString &displayName)
 {
     return displayName == "H.264" || displayName == "MVC" || displayName == "VC-1" || displayName == "MPEG-2" ||
-           displayName == "HEVC";
+           displayName == "HEVC" || displayName == "VVC";
 }
 
 QString floatToTime(double time, char msSeparator = '.')
@@ -1187,8 +1187,10 @@ void TsMuxerWindow::continueAddFile()
             {
                 if (firstWarn)
                 {
-                    msgBox.setText(
-                        tr("Track %1 was not recognized and ignored. File name: \"%2\"").arg(i).arg(newFileName));
+                    msgBox.setText(tr("Track %1 (TrackID %2) was not recognized and ignored. File name: \"%3\"")
+                                       .arg(i)
+                                       .arg(codecList[i].trackID)
+                                       .arg(newFileName));
                     msgBox.exec();
                     firstWarn = false;
                 }
@@ -1745,19 +1747,16 @@ QString TsMuxerWindow::getSrtParams()
 
     for (int i = 0; i < ui->trackLV->rowCount(); ++i)
     {
-        if (ui->trackLV->item(i, 0)->checkState() == Qt::Checked)
-        {
-            auto codecInfo = getCodecInfo(i);
-            if (!codecInfo)
-                continue;
+        auto codecInfo = getCodecInfo(i);
+        if (!codecInfo)
+            continue;
 
-            if (isVideoCodec(codecInfo->displayName))
-            {
-                rez += QString(",video-width=") + QString::number(codecInfo->width);
-                rez += QString(",video-height=") + QString::number(codecInfo->height);
-                rez += QString(",fps=") + fpsTextToFpsStr(codecInfo->fpsText);
-                return rez;
-            }
+        if (isVideoCodec(codecInfo->displayName))
+        {
+            rez += QString(",video-width=") + QString::number(std::min(codecInfo->width, 1920));
+            rez += QString(",video-height=") + QString::number(std::min(codecInfo->height, 1080));
+            rez += QString(",fps=") + fpsTextToFpsStr(codecInfo->fpsText);
+            return rez;
         }
     }
     rez += ",video-width=1920,video-height=1080,fps=23.976";
