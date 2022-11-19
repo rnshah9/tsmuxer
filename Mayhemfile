@@ -1,5 +1,0 @@
-project: tsmuxer
-target: tsMuxeR
-
-cmds:
-  - cmd: /tsMuxeR @@
