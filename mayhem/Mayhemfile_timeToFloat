@@ -1,0 +1,6 @@
+project: tsmuxer
+target: timetofloat
+
+cmds:
+  - cmd: /fuzz_timeToFloat
+    libfuzzer: true

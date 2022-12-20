@@ -3,4 +3,3 @@ target: tsmuxer
 
 cmds:
   - cmd: /tsMuxeR @@
-image: ghcr.io/rnshah9/playground:tsmuxer
